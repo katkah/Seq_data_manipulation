@@ -93,7 +93,7 @@ def main():
     sequences = read_fastq(file_name)
     split_fastq(sequences, number, file_name)
     call_seqtk(file_name, number)
-    print("FASTQ file successfully split into two files:", output_file1, "and", output_file2)
+    print("FASTQ file successfully split into two files")
 
 
 if __name__ == "__main__":
