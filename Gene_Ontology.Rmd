@@ -1,0 +1,162 @@
+---
+title: "Gene_Ontology"
+output: pdf_document
+date: "2024-03-11"
+---
+
+```{r setup, include=FALSE}
+library(data.table)
+library(apeglm)
+library(ggplot2)
+library(ggrepel)
+library(EnhancedVolcano)
+library(pheatmap)
+library(dplyr)
+library(RColorBrewer)
+library(GO.db)
+library(GOstats)
+library(org.At.tair.db)
+library(Rgraphviz)
+library(pathview)
+```
+
+
+## Annotation and Ontology
+
+When performing gene ontology analysis, you typically want to assess whether certain biological processes, molecular functions, or cellular components are overrepresented or enriched within your set of DEGs compared to what would be expected by chance, considering the entire population of genes as the background. 
+
+The hyperGTest function in R calculates a p-value indicating the significance of the observed enrichment or depletion of the category or term in the sample.
+
+It is essential to understand the population - "a gene universe" - from which the samples are being drawn. 
+
+This is the way how we generated our upregulated and downregulated gene sets:
+
+- From all the genes that were in the count data we prefiltered those that had more than 50 reads in all the samples. 
+- Then, DESeq2 did the independent filtering with alpha (the significance cutoff) set to 0.05 when the result function was called with desired contrasts. 
+- And lastly, we subset the results to get upregulated and downregulated genes with  (padj < 0.05 & log2FoldChange > 1) and (padj < 0.05 & log2FoldChange < -1), respecitvely.
+
+Therefore we worked with these populations:
+
+- Original Gene Count Table: all genes that were measured or quantified in the experiment
+
+- Prefiltered Genes (those with more than 50 reads in all samples)
+
+- Genes that came out of the Result Function with Independent Filtering with alpha = 0.05.
+These are all the genes that were tested for differential expressions and represent a "gene universe".
+
+- Genes that were assessed as upregulated and downregulated genes, with (padj < 0.05 & log2FoldChange > 1) and (padj < 0.05 & log2FoldChange < -1), respecitvely.They represent the samples from a "gene universe".
+
+The analysis is based on these sources:
+
+- https://qfab-bioinformatics.github.io/workshops-RNAseq-analysis-with-R/gene-set-enrichment.html
+- https://www.youtube.com/watch?v=BZyi8L7vBuc&t=76s&ab_channel=AlexSoupir
+- https://bioc.ism.ac.jp/packages/3.0/bioc/vignettes/GOstats/inst/doc/GOstatsHyperG.pdf
+
+
+
+## Set up functions
+
+```{r}
+# Get GOstats results for GO categories and KEGG pathways
+calcGOstats <- function(universeIDs, targetIDs, outGO, onto ) 
+{
+  # universeIDs : universe ids
+  # targetIDs : target ids
+  # outGO : file with significant GO categories
+  cutoff = 0.01
+  params <- new("GOHyperGParams",
+                  geneIds=targetIDs,
+                  universeGeneIds=universeIDs,
+                  annotation="org.At.tair.db",
+                  ontology= onto,
+                  pvalueCutoff=cutoff,
+                  conditional=FALSE,
+                  testDirection="over")
+  
+  # Run enrichment against Go categories - Biological process
+  Over <- hyperGTest(params)
+  GOtab <- summary(Over)
+ 
+  #We need to adjust for multiple testing using the p.adjust() function
+  GOtab$Adj_Pvalue <- p.adjust(GOtab$Pvalue, 'bonferroni')
+  
+  #reorder columns so that Adj_Pvalue is in the middle
+  GOtab <- GOtab[,c(1:2,8,3:7)]
+
+  #save tab before filtering
+  write.table(GOtab, file=outGO, sep="\t", col.names=T, row.names=F, quote=F)
+    
+  #subset Adj_Pvalue 
+  GOtab <- subset(GOtab, Adj_Pvalue < cutoff)
+  
+  print(paste("creating ", outGO))
+  print(paste("Enriched groups found in ", outGO, ":"))
+  print(GOtab$Term)
+  print("")
+}
+  
+
+
+process_name <- function(my_name, model, onto){
+
+  #down
+  file = paste(my_name,"_",model,"_downregulated_DESeq2.csv", sep="")
+  df_down <- read.csv(file)
+  names(df_down)[names(df_down) == "X"] <- "TAIR"
+  
+  #up
+  file = paste(my_name,"_",model,"_upregulated_DESeq2.csv", sep="")
+  df_up <- read.csv(file)
+  names(df_up)[names(df_up) == "X"] <- "TAIR"
+
+  #full
+  file = paste(my_name, "_", model, "_DESeq2.csv", sep="")
+  df <- read.csv(file)
+  names(df)[names(df) == "X"] <- "TAIR"
+
+
+  universeIDs <- as.character(unique(df$TAIR))
+  universeIDs <- universeIDs[!is.na(universeIDs)]
+
+  downIDs <- as.character(unique(df_down$TAIR))
+  downIDs <- downIDs[!is.na(downIDs)]
+
+  upIDs <- as.character(unique(df_up$TAIR))
+  upIDs <- upIDs[!is.na(upIDs)]  
+  
+  calcGOstats(universeIDs = universeIDs, 
+              targetIDs = downIDs, 
+              outGO = paste("./GO_enrichment/", my_name,"_downregulated_GO_", onto, ".txt",sep=""), 
+              onto )
+  
+  calcGOstats(universeIDs = universeIDs, 
+              targetIDs = upIDs, 
+              outGO = paste("./GO_enrichment/", my_name,"_upregulated_GO_", onto, ".txt",sep=""), 
+              onto )
+
+}
+```
+
+```{r}
+
+setwd("C:/Users/kater/DEG_fas_UV/gene_counts_two_parts/count_analysis/")
+
+my_names <- c(
+  "FUV_vs_FK", "WUV_vs_WK", "FK_vs_WK", 
+  "FUV_vs_WUV", "FUV_vs_WK"
+)
+
+onto_list <- c("BP","CC", "MF") #biological process, cellular component, molecular function
+
+sapply(my_names, process_name, model = "model1", onto = onto_list[1])
+sapply(my_names, process_name, model = "model1", onto = onto_list[2])
+sapply(my_names, process_name, model = "model1", onto = onto_list[3])
+
+process_name("WKvsWUV_vs_FKvsFUV", "model2", onto_list[1])
+process_name("WKvsWUV_vs_FKvsFUV", "model2", onto_list[2])
+process_name("WKvsWUV_vs_FKvsFUV", "model2", onto_list[3])
+
+```
+
+
+
