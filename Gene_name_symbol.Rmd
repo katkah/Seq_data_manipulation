@@ -1,0 +1,82 @@
+---
+title: "Gene_Name_Symbol"
+output: html_document
+date: "2024-03-19"
+---
+
+## Add annotation to DESeq2 results
+
+```{r setup, include=FALSE}
+library(org.At.tair.db)
+library(dplyr)
+
+# Define the function to process each file
+process_file <- function(fname) {
+  # Read the CSV file
+  df <- read.csv(fname)
+  
+  # Rename "X" column to "TAIR"
+  names(df)[names(df) == "X"] <- "TAIR"
+
+  
+  # Extract unique TAIR keys
+  my_keys <- unique(df$TAIR)
+  
+  # Define columns to select from org.At.tair.db  
+  my_col <- c('SYMBOL', 'GENENAME')
+  
+  # Query the database once with all the keys
+  annotation_results <- AnnotationDbi::select(org.At.tair.db, keys = my_keys, columns = my_col, keytype = "TAIR")
+  
+  # Merge the annotation results with the original data frame
+  merged_df <- merge(df, annotation_results, by.x = "TAIR", by.y = "TAIR", all.x = TRUE)
+  unique_values <- unique(df$TAIR)
+    
+  # Group results with the same TAIRid  
+  for (tair_value in unique_values) {
+    # Subset the data for the current unique value of 'TAIR'
+    current_group <- filter(merged_df, TAIR == tair_value)
+   
+    if (any(is.na(current_group$SYMBOL))) {
+      symbol <- NA   # or replace NA with a placeholder value or handle them accordingly
+    } else if (length(current_group$SYMBOL) > 1) {
+      symbol <- paste(unique(current_group$SYMBOL), collapse = ";")
+    } else {
+      symbol <- current_group$SYMBOL
+    }
+      # Check if GENENAME contains NA values
+    if (any(is.na(current_group$GENENAME))) {
+      genename <- NA   # or replace NA with a placeholder value or handle them accordingly
+    } else if (length(current_group$GENENAME) > 1) {
+      genename <- paste(unique(current_group$GENENAME), collapse = ";")
+    } else {
+      genename <- current_group$GENENAME
+    }    
+    
+    subset_idx <- df$TAIR == tair_value
+    if (any(subset_idx)) {
+      if (length(symbol) == 0) {df[subset_idx, "SYMBOL"] <- NA} else {df[subset_idx, "SYMBOL"] <- symbol}
+
+      if (length(genename) == 0) {df[subset_idx, "GENENAME"] <- NA} else {df[subset_idx, "GENENAME"] <- genename}
+    }
+  }  
+  
+  output_filename <- sub(".csv$", "_annotation.csv", basename(fname))
+  print(paste("creating",output_filename))
+  write.csv(df, file = output_filename, row.names = FALSE)
+}
+
+# Get the list of CSV files in the directory
+csv_files <- list.files(pattern = "\\.csv$", full.names = TRUE)
+
+# Apply the function to each CSV file
+
+invisible(lapply(csv_files, process_file))  # Use 'invisible' to suppress printing
+
+```
+
+
+
+
+
+
